@@ -39,11 +39,24 @@ const expenseRoutes       = require('./routes/expenses');
 const orderRoutes         = require('./routes/orders');
 const notificationRoutes  = require('./routes/notifications');
 
+// ── CORS origin helper ────────────────────────────────────────────────────────
+// Parses the ALLOWED_ORIGINS env var:
+//   - '*'            → allow all origins (useful for dev / open APIs)
+//   - 'a.com,b.com'  → allow those specific origins
+//   - ''  / unset    → fall back to '*' so the server is never silently blocked
+function getAllowedOrigins() {
+  const raw = (process.env.ALLOWED_ORIGINS || '').trim();
+  if (!raw || raw === '*') return '*';                           // wildcard
+  return raw.split(',').map(s => s.trim()).filter(Boolean);     // list
+}
+
+const ALLOWED_ORIGINS = getAllowedOrigins();
+
 const app    = express();
 const server = http.createServer(app);
 const io     = new Server(server, {
   cors: {
-    origin: (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
+    origin: ALLOWED_ORIGINS,
     credentials: true
   }
 });
@@ -59,7 +72,7 @@ app.use(express.json({
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(compression());
 app.use(cors({
-  origin: (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
+  origin: ALLOWED_ORIGINS,
   credentials: true
 }));
 if (process.env.NODE_ENV !== 'test') app.use(morgan('dev'));
