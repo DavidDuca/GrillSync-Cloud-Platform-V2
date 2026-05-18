@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "vercel dev",
     "start": "node scripts/dev-server.js",
-    "seed": "node server/scripts/seed.js"
+    "seed": "node server/scripts/seed.js",
+    "build": "node scripts/seed.js && next build"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
