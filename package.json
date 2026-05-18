@@ -1,28 +1,30 @@
 {
   "name": "grillsync-cloud",
-  "version": "1.0.0",
-  "description": "GrillSync Cloud Management Platform — multi-tenant SaaS for restaurant owners",
-  "main": "server/index.js",
+  "version": "2.0.0",
+  "description": "GrillSync Cloud — Vercel-ready serverless dashboard + POS sync API",
+  "private": true,
+  "engines": {
+    "node": ">=18.18"
+  },
   "scripts": {
-    "start": "node server/index.js",
-    "dev":   "nodemon server/index.js",
-    "seed":  "node server/scripts/seed.js"
+    "dev": "vercel dev",
+    "start": "node scripts/dev-server.js",
+    "seed": "node server/scripts/seed.js"
   },
   "dependencies": {
-    "bcryptjs":      "^2.4.3",
-    "compression":   "^1.7.4",
-    "cors":          "^2.8.5",
-    "dotenv":        "^16.4.5",
-    "express":       "^4.19.2",
+    "bcryptjs": "^2.4.3",
+    "compression": "^1.7.4",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
     "express-rate-limit": "^7.3.1",
-    "helmet":        "^7.1.0",
-    "jsonwebtoken":  "^9.0.2",
-    "mongoose":      "^8.4.0",
-    "morgan":        "^1.10.0",
-    "socket.io":     "^4.7.5",
-    "uuid":          "^10.0.0"
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.4.0",
+    "morgan": "^1.10.0",
+    "uuid": "^10.0.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.3"
+    "vercel": "^37.0.0"
   }
 }

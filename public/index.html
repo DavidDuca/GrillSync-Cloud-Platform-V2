@@ -730,11 +730,32 @@ canvas { max-height: 230px; }
         <div class="notif-list" id="notif-list"><div style="color:var(--text-3);padding:1rem">Loading...</div></div>
       </div>
 
-      <!-- ── RESTAURANTS ── -->
+      <!-- ── RESTAURANTS / SETTINGS ── -->
       <div class="page" id="page-restaurants">
-        <div class="section-header"><div><div class="section-title">Restaurants & Branches</div></div></div>
+        <div class="section-header" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap">
+          <div>
+            <div class="section-title">Restaurants &amp; Branches</div>
+            <div class="section-sub" style="color:var(--text-3);font-size:.78rem">Add a branch to instantly provision a cloud-synced POS endpoint.</div>
+          </div>
+          <button id="btn-add-branch" class="btn btn-primary"
+                  style="background:var(--brand);color:#fff;border:0;padding:.55rem 1rem;border-radius:var(--radius-sm);font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:.5rem">
+            <i class="fa-solid fa-plus"></i> Add Branch
+          </button>
+        </div>
         <div id="restaurants-wrap"><div style="color:var(--text-3);padding:1rem">Loading...</div></div>
       </div>
+
+      <!-- ── Add Branch modal ── -->
+      <div id="branch-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;padding:1rem">
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);max-width:560px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.4)">
+          <div style="padding:1.25rem 1.5rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+            <div style="font-weight:700;font-size:1rem" id="branch-modal-title">Add a new branch</div>
+            <button id="branch-modal-close" style="background:none;border:0;color:var(--text-3);cursor:pointer;font-size:1.1rem">✕</button>
+          </div>
+          <div id="branch-modal-body" style="padding:1.25rem 1.5rem"></div>
+        </div>
+      </div>
+
 
     </div><!-- /page-scroll -->
   </div><!-- /main -->
@@ -1432,31 +1453,206 @@ canvas { max-height: 230px; }
     } catch (err) { /* silently skip */ }
   }
 
-  // ── RESTAURANTS ────────────────────────────────────────────────────
+  // ── RESTAURANTS / SETTINGS ─────────────────────────────────────────
+  let _restaurantsCache = [];
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
   async function loadRestaurants() {
     try {
-      const data = await api('GET', '/api/restaurants');
+      const data  = await api('GET', '/api/restaurants');
       const rests = data.restaurants || [];
+      _restaurantsCache = rests;
       $('restaurants-wrap').innerHTML = rests.map(r => `
         <div class="chart-card" style="margin-bottom:1rem">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem;gap:1rem;flex-wrap:wrap">
             <div>
-              <div style="font-size:.92rem;font-weight:700">${r.name}</div>
-              <div style="font-size:.75rem;color:var(--text-3)">${r.restaurantId} · ${r.plan} plan · ${r.isActive ? '✓ Active' : '✗ Inactive'}</div>
+              <div style="font-size:.92rem;font-weight:700">${esc(r.name)}</div>
+              <div style="font-size:.75rem;color:var(--text-3)">${esc(r.restaurantId)} · ${esc(r.plan)} plan · ${r.isActive ? '✓ Active' : '✗ Inactive'}</div>
             </div>
+            <button class="btn-add-branch-inline" data-restaurant-id="${esc(r.restaurantId)}"
+              style="background:var(--surface2);color:var(--text-1);border:1px solid var(--border);padding:.4rem .8rem;border-radius:var(--radius-sm);font-size:.78rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:.4rem">
+              <i class="fa-solid fa-plus"></i> Add Branch
+            </button>
           </div>
-          <div style="font-size:.8rem;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:1px;margin-bottom:.5rem">Branches</div>
+          <div style="font-size:.8rem;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:1px;margin-bottom:.5rem">Branches (${(r.branches||[]).length})</div>
           <div style="display:flex;flex-direction:column;gap:.4rem">
             ${(r.branches||[]).map(b => `
-              <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:.65rem 1rem;display:flex;align-items:center;gap:.75rem">
+              <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:.65rem 1rem;display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
                 <span class="status-dot ${b.syncStatus||'never'}"></span>
-                <div style="flex:1"><div style="font-size:.84rem;font-weight:600">${b.name}</div><div style="font-size:.72rem;color:var(--text-3)">${b.address||''} · Last sync: ${b.lastSyncAt ? new Date(b.lastSyncAt).toLocaleString('en-PH',{dateStyle:'short',timeStyle:'short'}) : 'Never'}</div></div>
-                <div style="font-size:.72rem;color:var(--text-3);font-family:'JetBrains Mono',monospace">${b.branchId}</div>
-              </div>`).join('')}
+                <div style="flex:1;min-width:200px">
+                  <div style="font-size:.84rem;font-weight:600">${esc(b.name)}</div>
+                  <div style="font-size:.72rem;color:var(--text-3)">${esc(b.address||'')} · Last sync: ${b.lastSyncAt ? new Date(b.lastSyncAt).toLocaleString('en-PH',{dateStyle:'short',timeStyle:'short'}) : 'Never'}</div>
+                </div>
+                <div style="font-size:.72rem;color:var(--text-3);font-family:'JetBrains Mono',monospace">${esc(b.branchId)}</div>
+                <a class="dl-script" href="/api/restaurants/${esc(r.restaurantId)}/branches/${esc(b.branchId)}/sync-script.js"
+                   style="font-size:.72rem;color:var(--brand);text-decoration:none;font-weight:600"
+                   title="Re-download the sync script for this branch (secret placeholder — rotate keys to get a fresh secret)">
+                  <i class="fa-solid fa-download"></i> Script
+                </a>
+              </div>`).join('') || '<div style="color:var(--text-3);font-size:.78rem">No branches yet — click "Add Branch" to provision one.</div>'}
           </div>
         </div>`).join('') || '<div style="color:var(--text-3);padding:1rem">No restaurants found</div>';
+
+      // Authenticated downloads — fetch with auth header, blob it, save.
+      document.querySelectorAll('.dl-script').forEach(a => {
+        a.addEventListener('click', async (ev) => {
+          ev.preventDefault();
+          try {
+            const resp = await fetch(a.getAttribute('href'), { headers: { Authorization: `Bearer ${token}` } });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const blob = await resp.blob();
+            const url  = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = a.getAttribute('href').split('/').pop();
+            document.body.appendChild(link); link.click(); link.remove();
+            URL.revokeObjectURL(url);
+          } catch (err) { showToast('Download failed: ' + err.message, 'error'); }
+        });
+      });
+
+      document.querySelectorAll('.btn-add-branch-inline').forEach(btn => {
+        btn.addEventListener('click', () => openBranchModal(btn.dataset.restaurantId));
+      });
     } catch (err) { showToast('Failed to load restaurants: ' + err.message, 'error'); }
   }
+
+  // ── Add Branch modal ───────────────────────────────────────────────
+  function openBranchModal(presetRestaurantId) {
+    const modal = $('branch-modal');
+    const body  = $('branch-modal-body');
+    $('branch-modal-title').textContent = 'Add a new branch';
+
+    const options = _restaurantsCache.map(r =>
+      `<option value="${esc(r.restaurantId)}" ${presetRestaurantId === r.restaurantId ? 'selected' : ''}>${esc(r.name)}</option>`
+    ).join('');
+
+    body.innerHTML = `
+      <form id="branch-form" style="display:flex;flex-direction:column;gap:.85rem">
+        ${_restaurantsCache.length > 1 ? `
+          <div>
+            <label class="form-label" style="display:block;font-size:.78rem;color:var(--text-3);margin-bottom:.25rem">Restaurant</label>
+            <select id="bf-restaurant" class="form-control" required>${options}</select>
+          </div>
+        ` : `<input type="hidden" id="bf-restaurant" value="${esc(presetRestaurantId || _restaurantsCache[0]?.restaurantId || '')}">`}
+        <div>
+          <label class="form-label" style="display:block;font-size:.78rem;color:var(--text-3);margin-bottom:.25rem">Branch Name *</label>
+          <input id="bf-name" class="form-control" required placeholder="e.g. Quezon City - Tomas Morato" maxlength="100">
+        </div>
+        <div>
+          <label class="form-label" style="display:block;font-size:.78rem;color:var(--text-3);margin-bottom:.25rem">Location / Address</label>
+          <input id="bf-address" class="form-control" placeholder="Street, City" maxlength="200">
+        </div>
+        <div>
+          <label class="form-label" style="display:block;font-size:.78rem;color:var(--text-3);margin-bottom:.25rem">Contact Number</label>
+          <input id="bf-phone" class="form-control" placeholder="+63 9XX XXX XXXX" maxlength="40">
+        </div>
+        <div id="bf-error" style="color:var(--red);font-size:.78rem;display:none"></div>
+        <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.5rem">
+          <button type="button" id="bf-cancel" style="background:var(--surface2);border:1px solid var(--border);color:var(--text-1);padding:.5rem 1rem;border-radius:var(--radius-sm);cursor:pointer">Cancel</button>
+          <button type="submit" id="bf-submit" style="background:var(--brand);color:#fff;border:0;padding:.5rem 1.1rem;border-radius:var(--radius-sm);font-weight:600;cursor:pointer">Create branch</button>
+        </div>
+      </form>
+    `;
+    modal.style.display = 'flex';
+
+    $('bf-cancel').onclick = closeBranchModal;
+    $('branch-form').onsubmit = async (ev) => {
+      ev.preventDefault();
+      const restaurantId = ($('bf-restaurant').value || '').trim();
+      const name    = $('bf-name').value.trim();
+      const address = $('bf-address').value.trim();
+      const phone   = $('bf-phone').value.trim();
+      if (!restaurantId || !name) return;
+      $('bf-submit').disabled = true;
+      $('bf-submit').textContent = 'Creating...';
+      $('bf-error').style.display = 'none';
+      try {
+        const resp = await api('POST', `/api/restaurants/${restaurantId}/branches`, { name, address, phone });
+        showBranchSuccess(resp);
+      } catch (err) {
+        $('bf-error').textContent = err.message;
+        $('bf-error').style.display = 'block';
+        $('bf-submit').disabled = false;
+        $('bf-submit').textContent = 'Create branch';
+      }
+    };
+  }
+
+  function closeBranchModal() {
+    $('branch-modal').style.display = 'none';
+    $('branch-modal-body').innerHTML = '';
+  }
+
+  document.addEventListener('click', (e) => {
+    if (e.target?.id === 'branch-modal') closeBranchModal();
+  });
+  document.addEventListener('DOMContentLoaded', () => {
+    const headerBtn = $('btn-add-branch');
+    const closeBtn  = $('branch-modal-close');
+    if (headerBtn) headerBtn.addEventListener('click', () => openBranchModal());
+    if (closeBtn)  closeBtn.addEventListener('click', closeBranchModal);
+  });
+  // Also wire immediately in case DOMContentLoaded already fired
+  {
+    const headerBtn = $('btn-add-branch');
+    const closeBtn  = $('branch-modal-close');
+    if (headerBtn && !headerBtn._wired) { headerBtn._wired = true; headerBtn.addEventListener('click', () => openBranchModal()); }
+    if (closeBtn  && !closeBtn._wired)  { closeBtn._wired  = true; closeBtn.addEventListener('click', closeBranchModal); }
+  }
+
+  function showBranchSuccess(resp) {
+    const c = resp.branchCredentials;
+    const body = $('branch-modal-body');
+    $('branch-modal-title').textContent = 'Branch created — save credentials now';
+    body.innerHTML = `
+      <div style="background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.4);color:#F59E0B;padding:.7rem 1rem;border-radius:var(--radius-sm);font-size:.78rem;margin-bottom:1rem">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        The API secret is shown <strong>once</strong>. The sync script below already embeds it — save the file before closing this dialog.
+      </div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:.4rem .85rem;font-size:.78rem;align-items:center;margin-bottom:1rem">
+        <div style="color:var(--text-3)">Branch ID</div>
+        <code style="font-family:'JetBrains Mono',monospace;background:var(--surface2);padding:.25rem .5rem;border-radius:4px">${esc(c.branchId)}</code>
+        <div style="color:var(--text-3)">Restaurant ID</div>
+        <code style="font-family:'JetBrains Mono',monospace;background:var(--surface2);padding:.25rem .5rem;border-radius:4px">${esc(c.restaurantId)}</code>
+        <div style="color:var(--text-3)">API Key</div>
+        <code style="font-family:'JetBrains Mono',monospace;background:var(--surface2);padding:.25rem .5rem;border-radius:4px;word-break:break-all">${esc(c.apiKey)}</code>
+        <div style="color:var(--text-3)">API Secret</div>
+        <code style="font-family:'JetBrains Mono',monospace;background:var(--surface2);padding:.25rem .5rem;border-radius:4px;word-break:break-all">${esc(c.apiSecret)}</code>
+        <div style="color:var(--text-3)">Sync Endpoint</div>
+        <code style="font-family:'JetBrains Mono',monospace;background:var(--surface2);padding:.25rem .5rem;border-radius:4px;word-break:break-all">${esc(c.syncEndpoint)}</code>
+      </div>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem">
+        <button id="bf-download" style="background:var(--brand);color:#fff;border:0;padding:.5rem 1rem;border-radius:var(--radius-sm);font-weight:600;cursor:pointer">
+          <i class="fa-solid fa-download"></i> Download sync script
+        </button>
+        <button id="bf-copy" style="background:var(--surface2);color:var(--text-1);border:1px solid var(--border);padding:.5rem 1rem;border-radius:var(--radius-sm);font-weight:600;cursor:pointer">
+          <i class="fa-solid fa-copy"></i> Copy script to clipboard
+        </button>
+      </div>
+      <details style="font-size:.75rem;color:var(--text-3)">
+        <summary style="cursor:pointer;color:var(--text-2);font-weight:600">Show script preview</summary>
+        <pre style="margin-top:.5rem;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:.75rem;overflow:auto;max-height:280px;font-size:.7rem;line-height:1.4"><code>${esc(resp.syncScript)}</code></pre>
+      </details>
+      <div style="display:flex;justify-content:flex-end;margin-top:1rem">
+        <button id="bf-done" style="background:var(--surface2);border:1px solid var(--border);color:var(--text-1);padding:.5rem 1rem;border-radius:var(--radius-sm);cursor:pointer">Done</button>
+      </div>
+    `;
+    $('bf-download').onclick = () => {
+      const blob = new Blob([resp.syncScript], { type: 'application/javascript' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href = url; a.download = `grillsync-sync-${c.branchId}.js`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    };
+    $('bf-copy').onclick = async () => {
+      try { await navigator.clipboard.writeText(resp.syncScript); showToast('Script copied to clipboard', 'success'); }
+      catch (_) { showToast('Clipboard blocked — use download instead', 'error'); }
+    };
+    $('bf-done').onclick = () => { closeBranchModal(); loadRestaurants(); };
+  }
+
 
   // ── Boot on load ───────────────────────────────────────────────────
   if (token) bootApp();

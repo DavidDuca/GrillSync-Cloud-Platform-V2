@@ -14,8 +14,8 @@ const posAuth      = require('../middleware/posAuth');
 const SyncedOrder  = require('../models/SyncedOrder');
 const Notification = require('../models/Notification');
 
-// POST /sync/batch
-router.post('/batch', posAuth, async (req, res) => {
+// Shared ingest handler — used by both /batch (legacy) and /branch-upload (v2).
+async function ingestBatchHandler(req, res) {
   const { records } = req.body;
   const { restaurant, branch } = req;
 
@@ -55,19 +55,25 @@ router.post('/batch', posAuth, async (req, res) => {
     }
   }
 
-  // Emit realtime update to any connected dashboard clients watching this restaurant
-  const io = req.app.get('io');
-  if (io && accepted.length > 0) {
-    io.to(`restaurant:${restaurant.restaurantId}`).emit('sync:batchReceived', {
-      restaurantId: restaurant.restaurantId,
-      branchId:     branch.branchId,
-      count:        accepted.length,
-      receivedAt:   new Date()
-    });
-  }
+  // Realtime fan-out removed in the serverless build — dashboard now polls
+  // /api/restaurants/:restaurantId for branch.lastSyncAt updates. If we ever
+  // bring back push, plug Pusher/Ably/Supabase Realtime here.
 
-  res.json({ accepted, rejected });
-});
+
+  res.json({
+    accepted,
+    rejected,
+    branchId:     branch.branchId,
+    restaurantId: restaurant.restaurantId,
+    serverTime:   new Date(),
+  });
+}
+
+// Mount under both names. Same auth, same handler, same contract.
+//   POST /sync/batch                 (legacy — matches POS syncService.js as-shipped)
+//   POST /api/sync/branch-upload     (v2 canonical, Branch-ID driven)
+router.post('/batch',          posAuth, ingestBatchHandler);
+router.post('/branch-upload',  posAuth, ingestBatchHandler);
 
 async function ingestOrder(rec, restaurantId, branchId) {
   const p = rec.payload;

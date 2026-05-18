@@ -1,19 +1,6 @@
-# Dependency folders (never commit these)
 node_modules/
-jspm_packages/
-
-# Local environment / secret files (API keys, passwords)
 .env
 .env.local
-
-# Logs
-logs
+.vercel/
 *.log
-
-# Operating system files
 .DS_Store
-Thumbs.db
-
-# Build directories
-dist/
-build/

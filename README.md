@@ -1,356 +1,151 @@
-# GrillSync Cloud Management Platform
+# GrillSync Cloud — v2 (Vercel-ready)
 
-A multi-tenant SaaS restaurant management platform that receives synchronized
-data from locally-hosted GrillSync POS systems installed in restaurant branches.
+Multi-tenant SaaS dashboard for restaurant branches, with a zero-config
+"Add Branch" flow that generates a self-contained sync worker for each
+local POS instance.
 
----
+## What changed vs v1
 
-## Architecture Overview
+| Concern                | v1 (Express + Socket.IO)                 | v2 (Vercel serverless)                          |
+|------------------------|------------------------------------------|-------------------------------------------------|
+| Runtime                | Long-lived Node process                  | Cloudflare/Vercel serverless functions          |
+| Entry point            | `server/index.js` (`app.listen`)         | `api/[...path].js` → cached Express app         |
+| MongoDB connection     | Single global, opened at boot            | Per-cold-start cached pool (`lib/db.js`)        |
+| Realtime (Socket.IO)   | In-process rooms                         | Removed; dashboard polls `branch.lastSyncAt`    |
+| Static dashboard       | `app.use(express.static)` + SPA fallback | Vercel serves `/public` directly via rewrites   |
+| Sync endpoint          | `POST /sync/batch` only                  | `POST /sync/batch` **and** `/api/sync/branch-upload` |
+| Add Branch flow        | Backend route only                       | Backend + dashboard modal + downloadable script |
+| Env var config         | Mixed                                    | Pure `process.env`, no hardcoded URLs           |
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                      CLOUD PLATFORM (This repo)                     │
-│                                                                     │
-│  ┌──────────────┐   ┌──────────────┐   ┌─────────────────────────┐ │
-│  │  Dashboard   │   │  REST API    │   │  Socket.IO              │ │
-│  │  (SPA HTML)  │◄──│  Express.js  │◄──│  Realtime events        │ │
-│  └──────────────┘   └──────┬───────┘   └─────────────────────────┘ │
-│                             │                                       │
-│                     ┌───────▼────────┐                             │
-│                     │   MongoDB      │                             │
-│                     │   (Cloud DB)   │                             │
-│                     └────────────────┘                             │
-└──────────────────────────────┬──────────────────────────────────────┘
-                               │ HTTPS POST /sync/batch
-                               │ (HMAC-signed batches)
-        ┌──────────────────────▼──────────────────────────┐
-        │              LOCAL POS SYSTEM                   │
-        │  (Jonel's Inasalan — or any GrillSync branch)   │
-        │                                                 │
-        │  server.js ──► syncService.js ──► SyncQueue     │
-        │  Orders placed → queued → uploaded when online  │
-        └─────────────────────────────────────────────────┘
-```
+The legacy `POST /sync/batch` path is preserved for backward compatibility
+with already-deployed POS instances. The new canonical path is
+`POST /api/sync/branch-upload` (same contract).
 
----
+## Deploy to Vercel
 
-## How the Sync Works
+1. Push this repo to GitHub.
+2. In the Vercel dashboard → New Project → import the repo.
+3. Add environment variables (Settings → Environment Variables):
+   - `MONGO_URI` (MongoDB Atlas connection string — required)
+   - `JWT_SECRET` (long random string — required)
+   - `ALLOWED_ORIGINS` (comma-separated, or `*`)
+   - `PUBLIC_BASE_URL` (optional; auto-detected from request if omitted)
+4. Deploy. Vercel will route everything through `api/[...path].js` and
+   serve the dashboard from `/public/index.html`.
 
-The POS system already has a complete sync architecture (syncService.js,
-SyncQueue.js, syncRoutes.js). The cloud platform is the **receiving end**.
+No build step is required.
 
-### POS side (already built)
-1. Order is placed and saved to local MongoDB
-2. `syncService.enqueueOrder(order)` adds it to the SyncQueue collection
-3. Every 30 seconds (or on demand), the sync worker batches up to 50 pending records
-4. Batch is HMAC-signed with the branch secret and POSTed to `CLOUD_SYNC_URL/sync/batch`
-5. On success, queue items are marked `synced`; on failure they retry with backoff
+## Local dev
 
-### Cloud side (this repo)
-1. `POST /sync/batch` receives the signed batch
-2. `posAuth` middleware verifies the HMAC signature against the stored key
-3. Each record is upserted into `SyncedOrder` (idempotent — retries are safe)
-4. A Socket.IO event fires to all dashboard clients watching that restaurant
-5. Analytics queries run against `SyncedOrder` in real time
-
----
-
-## Quick Start
-
-### 1. Prerequisites
-- Node.js 18+
-- MongoDB 6+ (local or Atlas)
-- A running GrillSync POS instance
-
-### 2. Install
 ```bash
-cd grillsync-cloud
+cp .env.example .env       # then fill in MONGO_URI + JWT_SECRET
 npm install
+npm start                  # http://localhost:4000
 ```
 
-### 3. Configure
+Or use the Vercel emulator (matches production routing exactly):
+
 ```bash
-cp .env.example .env
-# Edit .env with your MongoDB URI and JWT secret
+npx vercel dev
 ```
 
-Minimum `.env`:
-```env
-PORT=4000
-MONGO_URI=mongodb://127.0.0.1:27017/grillsync_cloud
-JWT_SECRET=replace_with_64_char_random_string
-ALLOWED_ORIGINS=http://localhost:4000
-```
+## Add Branch flow (end-to-end)
 
-### 4. Seed initial data
-```bash
-node server/scripts/seed.js
-```
+1. Sign in to the dashboard as an owner/superadmin.
+2. Go to **Settings → Restaurants & Branches**.
+3. Click **Add Branch**, fill in name / address / contact, save.
+4. The success dialog shows the Branch ID, API key, **API secret (once!)**,
+   and a **Download sync script** button.
+5. Drop the downloaded `grillsync-sync-<branchId>.js` file into the local
+   POS server directory and run:
 
-This creates:
-- Superadmin: `admin@grillsync.app` / `Admin@1234`
-- Demo restaurant: Jonel's Inasalan
-- One branch with API credentials (printed to console)
+   ```bash
+   node grillsync-sync-<branchId>.js
+   ```
 
-### 5. Start
-```bash
-# Production
-npm start
+   The script reads pending records from the POS's local `syncqueues`
+   collection, batches them, signs with HMAC-SHA256, and uploads to
+   `/api/sync/branch-upload`. It retries with exponential backoff on
+   failure and never blocks POS operation.
 
-# Development (auto-restart)
-npm run dev
-```
+If the secret is lost: hit **rotate keys** on that branch — the response
+contains a fresh script. The `/sync-script.js` download endpoint will
+issue a script with a placeholder secret (we don't store secrets in
+plaintext).
 
-Dashboard: http://localhost:4000
+## Sync wire contract
 
----
+Every sync request includes these headers; the body is signed verbatim.
 
-## Connect a POS Branch
+| Header             | Value                                                |
+|--------------------|------------------------------------------------------|
+| `X-Api-Key`        | Branch API key (`rk_…`)                              |
+| `X-Restaurant-Id`  | Parent restaurant ID (`rest_…`)                      |
+| `X-Timestamp`      | `Date.now().toString()` (must be within 5 min)       |
+| `X-Signature`      | `HMAC_SHA256(sha256(apiSecret), "{ts}.{rawBody}")`   |
 
-After seeding, copy the printed credentials into your POS `.env`:
+`apiSecret` is the plain secret that was shown once at branch creation;
+the cloud stores only its SHA-256, and both sides use that hash as the
+HMAC key. The generated script handles this automatically.
 
-```env
-# In your POS server .env file:
-CLOUD_SYNC_URL=http://your-cloud-server:4000
-CLOUD_SYNC_API_KEY=rk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-CLOUD_SYNC_SECRET=whsec_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-CLOUD_RESTAURANT_ID=rest_jonels_main
-CLOUD_SYNC_ENABLED=true
-CLOUD_SYNC_INTERVAL_MS=30000
-```
+Body:
 
-The POS syncService.js reads these variables automatically and begins uploading.
-
----
-
-## API Reference
-
-### Authentication
-All `/api/*` endpoints require:
-```
-Authorization: Bearer <jwt_token>
-```
-
-Get a token via `POST /api/auth/login`.
-
-### POS Sync Endpoints (no JWT — uses API key + HMAC)
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/sync/batch` | Receive order batch from POS |
-| GET | `/sync/status` | Health check for POS |
-
-### Auth
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/auth/login` | Login → JWT token |
-| POST | `/api/auth/register` | Create account |
-| GET | `/api/auth/me` | Current user |
-| PATCH | `/api/auth/me` | Update profile/password |
-
-### Analytics
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/analytics/summary?range=30&branchId=` | KPI summary |
-| GET | `/api/analytics/daily?range=30&branchId=` | Day-by-day data |
-| GET | `/api/analytics/hourly?branchId=` | Today hourly |
-| GET | `/api/analytics/bestsellers?range=30&limit=10` | Top items |
-| GET | `/api/analytics/categories?range=30` | By category |
-| GET | `/api/analytics/branches?range=30` | Branch comparison |
-| GET | `/api/analytics/profit?range=30&branchId=` | P&L data |
-| GET | `/api/analytics/realtime` | Live active orders |
-
-### Restaurants
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/restaurants` | List restaurants |
-| POST | `/api/restaurants` | Create restaurant + owner |
-| GET | `/api/restaurants/:id` | Get restaurant |
-| POST | `/api/restaurants/:id/branches` | Add branch |
-| PATCH | `/api/restaurants/:id/branches/:bid` | Update branch |
-| POST | `/api/restaurants/:id/branches/:bid/rotate-keys` | Rotate API keys |
-| GET | `/api/restaurants/:id/users` | List users |
-| POST | `/api/restaurants/:id/users` | Invite user |
-
-### Expenses
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/expenses?range=30&branchId=&category=` | List expenses |
-| POST | `/api/expenses` | Create expense |
-| PATCH | `/api/expenses/:id` | Update / approve |
-| DELETE | `/api/expenses/:id` | Delete |
-
-### Orders
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/orders?page=1&limit=30&branchId=&date=` | Order history |
-| GET | `/api/orders/:orderId` | Single order |
-
-### Notifications
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/notifications` | List notifications |
-| PATCH | `/api/notifications/:id/read` | Mark read |
-| POST | `/api/notifications/read-all` | Mark all read |
-
----
-
-## Multi-Tenant Design
-
-Every document in MongoDB has `restaurantId` and (where relevant) `branchId`.
-Every authenticated API request is automatically scoped to `req.user.restaurantId`
-— users can never access other restaurants' data.
-
-```
-Restaurant (tenant)
-  └── Branch[] (one POS per branch)
-        └── SyncedOrder[] (all orders from that branch)
-        └── Expense[] (expenses logged for that branch)
-
-User
-  └── restaurantId (belongs to one restaurant)
-  └── branchId (optional — null = all branches)
-  └── role (owner | manager | cashier | staff | superadmin)
-```
-
-### Adding a new restaurant
-```bash
-POST /api/restaurants
+```json
 {
-  "name": "My Restaurant",
-  "ownerEmail": "owner@myrest.com",
-  "ownerPassword": "SecurePass123",
-  "firstBranchName": "Main Branch",
-  "firstBranchAddress": "123 Main St"
+  "restaurantId": "rest_…",
+  "branchId":     "br_…",
+  "sentAt":       "2026-05-18T12:00:00.000Z",
+  "records": [
+    { "id": "…", "entity": "order", "entityId": "…", "op": "upsert",
+      "payload": { "orderId": "…", "items": [...], "totalPrice": 123, ... },
+      "createdAt": "…" }
+  ]
 }
 ```
 
-Response includes `branchCredentials.apiSecret` — shown once, copy to POS `.env`.
+Response:
 
----
-
-## Security Architecture
-
-| Layer | Implementation |
-|-------|---------------|
-| POS Authentication | API Key + HMAC-SHA256 signature per request |
-| Replay attack guard | Timestamp tolerance ±5 minutes |
-| User authentication | JWT (HS256, configurable expiry) |
-| Data isolation | All queries scoped by `restaurantId` from JWT |
-| Role-based access | `requireRole()` middleware per endpoint |
-| Rate limiting | Global 500 req/15min + Sync 200 req/min |
-| CORS | Explicit origin allowlist |
-| Headers | Helmet.js security headers |
-| Secret storage | API secrets stored as SHA-256 hash only |
-
----
-
-## Database Schema
-
-### SyncedOrder (mirrors POS Order exactly)
-```
-restaurantId    String   (tenant routing)
-branchId        String   (branch routing)
-orderId         String   (POS order ID — unique per branch)
-customerNo      Number   (daily sequential customer number)
-items[]         Array    (itemId, name, category, cookingArea, qty, addOns, lineTotal)
-totalPrice      Number
-cashReceived    Number
-changeDue       Number
-paymentMethod   String
-status          String   (pending|paid|preparing|partially-ready|ready|completed|cancelled)
-stations        Map      (grill|kitchen → { status, startedAt, readyAt })
-placedAt        Date
-paidAt          Date     (indexed for analytics queries)
-readyAt         Date
-completedAt     Date
-receivedAt      Date     (when cloud received it)
-syncQueueId     String   (POS queue ID for dedup)
+```json
+{
+  "accepted":  [{ "id": "…", "cloudId": "br_…:orderId" }],
+  "rejected":  [{ "id": "…", "error": "payload.orderId missing" }],
+  "branchId":  "br_…",
+  "restaurantId": "rest_…",
+  "serverTime": "…"
+}
 ```
 
-### Expense
-```
-restaurantId    String
-branchId        String
-title           String
-amount          Number
-category        String   (ingredients|utilities|salaries|maintenance|supplies|delivery|misc)
-description     String
-isRecurring     Boolean
-recurringInterval String
-status          String   (pending|approved|rejected)
-submittedBy     ObjectId → User
-approvedBy      ObjectId → User
-expenseDate     Date     (indexed)
-```
+Ingest is idempotent (`{branchId, orderId}` upsert), so retries are safe.
 
-### Restaurant (tenant)
-```
-restaurantId    String   (unique slug, e.g. rest_jonels_main)
-name            String
-plan            String   (trial|basic|pro|enterprise)
-branches[]      Array    (branchId, name, apiKey, apiSecret-hash, syncStatus, lastSyncAt)
-ownerIds[]      Array    → User
-```
-
----
-
-## Deployment (Production)
-
-### Option A — Same server as POS (small setup)
-```bash
-# Run on port 4000 alongside POS on port 3000
-PORT=4000 npm start
-```
-
-### Option B — Separate cloud server (recommended)
-1. Provision a VPS (DigitalOcean, Linode, AWS EC2)
-2. Install Node.js 18+ and MongoDB (or use MongoDB Atlas)
-3. Clone this repo, `npm install`, configure `.env`
-4. Use PM2 for process management:
-```bash
-npm install -g pm2
-pm2 start server/index.js --name grillsync-cloud
-pm2 startup && pm2 save
-```
-5. Use Nginx as reverse proxy with HTTPS (Let's Encrypt)
-
-### Option C — MongoDB Atlas (cloud DB)
-Replace `MONGO_URI` with your Atlas connection string:
-```env
-MONGO_URI=mongodb+srv://user:pass@cluster.mongodb.net/grillsync_cloud
-```
-
----
-
-## File Structure
+## Project layout
 
 ```
-grillsync-cloud/
-├── package.json
-├── .env.example
-├── README.md
-├── server/
-│   ├── index.js                Main Express + Socket.IO server
-│   ├── models/
-│   │   ├── Restaurant.js       Tenant model with branch credentials
-│   │   ├── User.js             RBAC user model
-│   │   ├── SyncedOrder.js      Cloud order mirror (matches POS schema)
-│   │   ├── Expense.js          Expense tracker
-│   │   └── Notification.js     In-app notifications
-│   ├── middleware/
-│   │   ├── auth.js             JWT verification
-│   │   ├── posAuth.js          POS HMAC signature verification
-│   │   └── requireRole.js      RBAC guard
-│   ├── routes/
-│   │   ├── auth.js             Login, register, me
-│   │   ├── sync.js             POS batch ingest
-│   │   ├── analytics.js        All aggregation queries
-│   │   ├── restaurants.js      Restaurant + branch management
-│   │   ├── expenses.js         Expense CRUD
-│   │   ├── orders.js           Order history
-│   │   └── notifications.js    Notification center
-│   └── scripts/
-│       └── seed.js             Initial data seeder
-└── public/
-    └── index.html              Single-page dashboard (Chart.js + Socket.IO)
+api/
+  [...path].js              ← Vercel catch-all → Express app
+lib/
+  app.js                    ← Express app factory (formerly server/index.js)
+  db.js                     ← Cached mongoose connect for cold starts
+  sync-script-template.js   ← Template rendered at Add Branch time
+public/
+  index.html                ← Dashboard SPA (+ Add Branch UI)
+server/
+  routes/                   ← auth, restaurants, sync, analytics, ...
+  models/                   ← Mongoose schemas
+  middleware/               ← auth, posAuth, requireRole
+scripts/
+  dev-server.js             ← Local fallback (no vercel CLI needed)
+vercel.json                 ← Routing + function config
+.env.example                ← Required env vars
 ```
+
+## What was intentionally NOT done
+
+- Socket.IO was removed. Restoring push updates needs an external broker
+  (Pusher / Ably / Supabase Realtime) — wire it where the comment in
+  `server/routes/sync.js` marks the fan-out point.
+- Mongo migrations: schemas are unchanged from v1, so no migration is
+  needed if you point this build at the existing database.
+- No Vercel Edge runtime (yet) — bcryptjs and mongoose both pull Node
+  built-ins. Edge migration would require swapping bcryptjs for a
+  Web-Crypto password hasher and using Mongo Data API instead of the
+  driver. Out of scope for v2.
