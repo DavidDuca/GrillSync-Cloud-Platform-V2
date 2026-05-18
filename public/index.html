@@ -7,7 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="/socket.io/socket.io.js"></script>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
 <style>
 /* ═══════════════════════════════════════════════════════════════
    DESIGN SYSTEM
@@ -450,6 +450,11 @@ canvas { max-height: 230px; }
   .kpi-grid { grid-template-columns: 1fr; }
 }
 </style>
+<!-- Runtime config: set GRILLSYNC_SOCKET_URL to your Render server URL in production -->
+<script>
+  // Replace the URL below with your Render Web Service URL after deploying
+  window.GRILLSYNC_SOCKET_URL = 'https://grillsync-cloud.onrender.com';
+</script>
 </head>
 <body>
 
@@ -910,8 +915,13 @@ canvas { max-height: 230px; }
   }
 
   function connectSocket() {
+    if (typeof io === 'undefined') {
+      console.warn('[WS] socket.io not available — realtime updates disabled');
+      return;
+    }
     if (socket) socket.disconnect();
-    socket = io({ auth: { token, restaurantId: user?.restaurantId } });
+    const SOCKET_URL = window.GRILLSYNC_SOCKET_URL || '';
+    socket = io(SOCKET_URL, { auth: { token, restaurantId: user?.restaurantId } });
     socket.on('sync:batchReceived', ({ branchId, count }) => {
       showToast(`${count} order(s) synced from ${branchId}`, 'success');
       // Refresh current page data
