@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GrillSync Cloud</title>
+  <meta name="description" content="GrillSync Cloud — restaurant POS analytics & sync dashboard" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+  <link rel="stylesheet" href="./styles.css" />
+  <script>
+    // Backend URL — override via window.BACKEND_URL or query ?backend=
+    (function () {
+      var u = new URL(location.href);
+      var qp = u.searchParams.get('backend');
+      var stored = localStorage.getItem('gs_backend_url');
+      window.BACKEND_URL = window.BACKEND_URL
+        || qp
+        || stored
+        || 'http://localhost:4000';
+      if (qp) localStorage.setItem('gs_backend_url', qp);
+    })();
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="modal-root"></div>
+  <div id="toast-root"></div>
+  <script src="./app.js"></script>
+</body>
+</html>
